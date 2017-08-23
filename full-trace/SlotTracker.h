@@ -4,6 +4,8 @@
 /// This class provides computation of slot numbers for LLVM Assembly writing.
 ///
 
+/// Almost exact code of LLVM Tracer with a few changes in an attempt to allow it to run on LLVM v6.0.
+
 /*#if (LLVM_VERSION == 34)
   #include "llvm/DebugInfo.h"
 #elif (LLVM_VERSION == 35)
@@ -12,7 +14,7 @@
   #include "llvm/IR/DebugInfo.h"
 #endif*/
 
-#include "llvm/IR/DebugInfo.h"
+#include "llvm/IR/DebugInfo.h" // Location of DebugInfo on newer versions. 
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseMap.h"
@@ -30,7 +32,7 @@
 #include "llvm/IR/TypeFinder.h"
 #include "llvm/IR/ValueSymbolTable.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/BinaryFormat/Dwarf.h"
+#include "llvm/BinaryFormat/Dwarf.h" // newer location for the Dwarf file
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/MathExtras.h"
@@ -131,8 +133,9 @@ private:
     /// Add all of the functions arguments, basic blocks, and instructions.
     void processFunction();
     
-   // SlotTracker(const SlotTracker &) LLVM_DELETED_FUNCTION;
-   // void operator=(const SlotTracker &) LLVM_DELETED_FUNCTION;
+   // SlotTracker(const SlotTracker &) LLVM_DELETED_FUNCTION; // Removed. This does not seem to be supported in newer versions of LLVM
+							      // and I haven't been able to find what function it served.
+   // void operator=(const SlotTracker &) LLVM_DELETED_FUNCTION; // same as above
 };
 
 SlotTracker *createSlotTracker(const Module *M) {
@@ -160,7 +163,8 @@ static SlotTracker *createSlotTracker(Value* V) {
         return new SlotTracker(Func);
     
     if (const MDNode *MD = dyn_cast<MDNode>(ValueAsMetadata::get(&*V))) {
-       // if (!MD->isFunctionLocal())
+       // if (!MD->isFunctionLocal())       // This function should never get called in the first place and, due to changes
+	    				    // in how metadata is treated, it no longer functions.
        // return new SlotTracker(V->getParent());
         
         return new SlotTracker((Function *)0);
@@ -207,7 +211,7 @@ void SlotTracker::processModule() {
     // Add all of the unnamed global variables to the value table.
     for (auto I = TheModule->global_begin(),
          E = TheModule->global_end(); I != E; ++I) {
-	const GlobalValue* J = &*I;
+	const GlobalValue* J = &*I; // Changes in how iterators reference information forces us to define values before using them.
         if (!J->hasName())
             CreateModuleSlot(J);
     }
@@ -231,7 +235,9 @@ void SlotTracker::processModule() {
         // Add all the function attributes to the table.
         // FIXME: Add attributes of other objects?
         AttributeSet FnAttrs = J->getAttributes().getFnAttributes();
-        if (FnAttrs.hasAttributes())
+        if (FnAttrs.hasAttributes()) // AttributeSet::FunctionIndex is no longer supported. While this may not function, I believe
+				     // it should serve a similar purpose. Because FnAttrs already references an attribute set, 
+				     // this checks to see if it is empty or not before attempting to add its attributes.
             CreateAttributeSetSlot(FnAttrs);
     }
     
@@ -256,35 +262,37 @@ void SlotTracker::processFunction() {
     // Add all of the basic blocks and instructions with no names.
     for (Function::const_iterator BBa = TheFunction->begin(),
          E = TheFunction->end(); BBa != E; ++BBa) {
-	const Value* BB = &*BBa;
+	const Value* BB = &*BBa; // we reference the function iterator here as a value for the check name function.
         if (!BB->hasName())
             CreateFunctionSlot(BB);
         
         for (BasicBlock::const_iterator J = BBa->begin(), E = BBa->end(); J != E;
              ++J) {
-	    const Instruction* K = &*J;
+	    const Instruction* K = &*J; // Iterating over the basicblock will returns instructions.
             if (!K->getType()->isVoidTy() && !K->hasName())
                 CreateFunctionSlot(K);
             
             // Intrinsics can directly use metadata.  We allow direct calls to any
             // llvm.foo function here, because the target may not be linked into the
             // optimizer.
-            if (const CallInst *CI = dyn_cast<CallInst>(K)) {
+            if (const CallInst *CI = dyn_cast<CallInst>(K)) { 
                 if (Function *F = CI->getCalledFunction()) {
                     if (F->isIntrinsic())
                         for (unsigned i = 0, e = K->getNumOperands(); i != e; ++i)
-                            if (MDNode *N = dyn_cast_or_null<MDNode>(ValueAsMetadata::get(K->getOperand(i)))) {
-                   //             CreateMetadataSlot(N);
+                            if (MDNode *N = dyn_cast_or_null<MDNode>(ValueAsMetadata::get(K->getOperand(i)))) { 
+				    // We use ValueAsMetadata here to reference an operand of K as a MDNode. This is due to the changes
+				    // in value vs metadata.
+                                CreateMetadataSlot(N);
 			}
                 }
                 // Add all the call attributes to the table.
                 AttributeSet realAt = CI->getAttributes().getFnAttributes();
-                if (realAt.hasAttributes())
+                if (realAt.hasAttributes()) // Same thing as above here.
                     CreateAttributeSetSlot(realAt);
             } else if (const InvokeInst *II = dyn_cast<InvokeInst>(K)) {
                 // Add all the call attributes to the table.
                 AttributeSet Attrs = II->getAttributes().getFnAttributes();
-                if (Attrs.hasAttributes())
+                if (Attrs.hasAttributes()) // And here
                     CreateAttributeSetSlot(Attrs);
             }
             
@@ -388,7 +396,8 @@ void SlotTracker::CreateMetadataSlot(const MDNode *N) {
     
     // Don't insert if N is a function-local metadata, these are always printed
     // inline.
-    // if (!N->isFunctionLocal()) {
+    // if (!N->isFunctionLocal()) { // Removed this because Metadata is no longer referenced as being local or not. This may or may not
+				    // impact the overall program. 
         mdn_iterator I = mdnMap.find(N);
         if (I != mdnMap.end())
             return;
