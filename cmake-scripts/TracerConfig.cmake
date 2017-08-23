@@ -1,6 +1,10 @@
 # In two-number form only. LLVM-Tracer will determine the patch version for you.
 if(NOT DEFINED LLVM_RECOMMEND_VERSION)
   SET(LLVM_RECOMMEND_VERSION 6.0)
+# This is really poorly done in my opinion. It will search for one version of llvm and fails if it isn't the version recommended
+# despite the fact it supports two version and hopefully three if this works. In any event, this needs to be set to the correct version
+# that you're running before you proceed. You can check the clang version to find the version you're running. I recommend 6.0 because
+# it's the newest.
 endif()
 
 # TODO : not used now
