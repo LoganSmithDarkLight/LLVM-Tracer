@@ -182,3 +182,19 @@ directory.
 
 ---------------------------------------------------------------------------------
 Sophia Shao, Sam Xi, and Emma Wang
+
+
+
+
+
+Logan's Notes:
+I've begun making a few edits to the program in an attempt to make it functional with newer versions of LLVM. At the moment, this still returns errors, so it isn't finished.
+The changes that I've made have been to:
+cmake-scripts/TracerConfig
+ast-pass/CMakeLists
+ast-pass/GetLabeledStmts
+full-trace/SlotTracker
+full-trace/full_trace.h
+
+All of my changes have comments, so you can see my thought process and why I had to change something. I can not guarantee that they all
+actually work at the time, as I'm still working on everything. 
