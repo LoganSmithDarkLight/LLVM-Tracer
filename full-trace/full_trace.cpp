@@ -28,8 +28,8 @@
 #elif (LLVM_VERSION == 50)
   #include "llvm/IR/DebugInfo.h"
 #endif*/
-#include "llvm/IR/DebugInfo.h"
-#include "llvm/IR/DebugInfoMetadata.h"
+#include "llvm/IR/DebugInfo.h" // location of DebugInfo on newer versions
+#include "llvm/IR/DebugInfoMetadata.h" // location of DebugInfoMetadata on newer versions
 
 #define RESULT_LINE 19134
 #define FORWARD_LINE 24601
@@ -244,15 +244,16 @@ bool Tracer::doInitialization(Module &M) {
   #endif*/
    // auto test = Finder.subprograms();
    // DISubprogram* Q = test[0].second;
-    DebugInfoFinder::subprogram_iterator it = Finder.subprograms().begin();
-    DebugInfoFinder::subprogram_iterator eit = Finder.subprograms().end();
+    DebugInfoFinder::subprogram_iterator it = Finder.subprograms().begin(); // Initialize Iterators
+    DebugInfoFinder::subprogram_iterator eit = Finder.subprograms().end();  // Initialize Iterators
+	// These iterators are currently not being used. They are a lot more problematic than any of the iterators so far.
+	// They can't be used to find names, but they also can't be initialized as the other iterators were. Thus, I attempted another
+	// approach to the problem.
 
  // for (DebugInfoFinder::subprogram_iterator i = it; i != eit; ++i) {
-    for (auto &F : M.functions()) {   
-// const MDNode* R = *i;
-   // DISubprogram* S = i[0].second;
-   // DISubprogram S(*i);
-    if (DISubprogram* S = cast_or_null<DISubprogram>(F.getSubprogram())) {
+    for (auto &F : M.functions()) {   // F will loop through the functions of M
+	    
+    if (DISubprogram* S = cast_or_null<DISubprogram>(F.getSubprogram())) { // S will find if the function is a subprogram or not
 
     auto MangledName = S->getLinkageName().str();
     auto Name = S->getName().str();
@@ -318,12 +319,13 @@ bool Tracer::runOnBasicBlock(BasicBlock &BB) {
     handlePhiNodes(&BB, &env);
 
   // From this point onwards, nodes cannot be PHI nodes.
-  BasicBlock::iterator nextitr1;
+  BasicBlock::iterator nextitr1; // Because we're using itr and nextitr as the actual references to stay in line with the base code,
+				 // I've renamed the iterators to have a 1 in front of them.
   for (BasicBlock::iterator itr1 = insertp; itr1 != BB.end(); itr1 = nextitr1) {
     nextitr1 = itr1;
     nextitr1++;
-    Instruction* itr = &*itr1;
-    Instruction* nextitr = &*nextitr1;
+    Instruction* itr = &*itr1; // Another update to the iterator as the base is broken on newer versions.
+    Instruction* nextitr = &*nextitr1;  // Same as above.
     // Get static BasicBlock ID: produce bbid
     makeValueId(&BB, env.bbid);
     // Get static instruction ID: produce instid
@@ -503,7 +505,7 @@ void Tracer::processAllocaInstruction(BasicBlock::iterator it) {
     // The debug declare call is not guaranteed to come right after the alloca.
     while (!found_debug_declare && !it->isTerminator()) {
       it++;
-      Instruction* I = &*it;
+      Instruction* I = &*it; // Another fix to iterators
       DbgDeclareInst *di = dyn_cast<DbgDeclareInst>(I);
       if (di) {
         Value *wrapping_arg = di->getAddress();
@@ -532,8 +534,9 @@ void Tracer::makeValueId(Value *value, char *id_str) {
   int id = st->getLocalSlot(value);
   bool hasName = value->hasName();
   if (BasicBlock* BB = dyn_cast<BasicBlock>(value)) {
-   // LoopInfo &info = getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
-    LoopInfo &info = getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
+   // LoopInfo &info = getAnalysis<LoopInfoWrapperPass>().getLoopInfo(); 
+    LoopInfo &info = getAnalysis<LoopInfoWrapperPass>().getLoopInfo(); // With changes to how loopinfo works, we need to instead call a
+	  							       // wrapper pass to get loopinfo
     unsigned loop_depth = info.getLoopDepth(BB);
     // 10^3 - 1 is the maximum loop depth.
     const unsigned kMaxLoopDepthChars = 3;
@@ -562,7 +565,7 @@ bool Tracer::isDmaFunction(std::string& funcName) {
 
 void Tracer::setLineNumberIfExists(Instruction *I, InstEnv *env) {
   if (MDNode *N = I->getMetadata("dbg")) {
-    if (DILocation *Loc = I->getDebugLoc()) {
+    if (DILocation *Loc = I->getDebugLoc()) { // Changes to DILocation force us to get DILocation this way
    // DILocation Loc(N); // DILocation is in DebugInfo.h
     env->line_number = Loc->getLine();
 	}
@@ -574,12 +577,12 @@ void Tracer::setLineNumberIfExists(Instruction *I, InstEnv *env) {
 // Handle all phi nodes at the beginning of a basic block.
 void Tracer::handlePhiNodes(BasicBlock* BB, InstEnv* env) {
   BasicBlock::iterator insertp1 = BB->getFirstInsertionPt();
-  Instruction* insertp = &*insertp;
+  Instruction* insertp = &*insertp; // more fixing iterators
   char prev_bbid[InstEnv::BUF_SIZE];
   char operR[InstEnv::BUF_SIZE];
 
   for (BasicBlock::iterator itr1 = BB->begin(); isa<PHINode>(itr1); itr1++) {
-    Instruction* itr = &*itr1;
+    Instruction* itr = &*itr1; // more fixing iterators
     InstOperandParams params;
     params.prev_bbid = prev_bbid;
     params.operand_name = operR;
@@ -679,8 +682,8 @@ void Tracer::handleCallInstruction(Instruction* inst, InstEnv* env) {
   printParamLine(inst, &params);
 
   int call_id = 0;
-//  const Function::ArgumentListType &Args(fun->getArgumentList());
-  for (auto arg_it = fun->arg_begin(), arg_end = fun->arg_end();
+//  const Function::ArgumentListType &Args(fun->getArgumentList()); // ArgumentListType was removed in newer versions of llvm
+  for (auto arg_it = fun->arg_begin(), arg_end = fun->arg_end(); // Instead, we can find a way to correct the iterators this way
        arg_it != arg_end; ++arg_it, ++call_id) {
     Value* curr_operand = inst->getOperand(call_id);
 
@@ -834,8 +837,8 @@ bool LabelMapHandler::runOnModule(Module &M) {
 
     if (verbose)
       errs() << "Contents of labelmap:\n" << labelmap_str << "\n";
-    Instruction* frontInst = &*main->front().getFirstInsertionPt();
-    IRBuilder<> builder(frontInst);
+    Instruction* frontInst = &*main->front().getFirstInsertionPt(); // This is a simple Instruction that finds the first insertion point
+    IRBuilder<> builder(frontInst); // And then creates an IRBuilder using it
     Function* labelMapWriter = cast<Function>(M.getOrInsertFunction(
         "trace_logger_write_labelmap", builder.getVoidTy(),
         builder.getInt8PtrTy(), builder.getInt64Ty(), nullptr));
