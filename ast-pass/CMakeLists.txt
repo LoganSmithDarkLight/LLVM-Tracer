@@ -8,6 +8,8 @@ link_directories($ENV{LLVM_HOME}/lib)
 include_directories($ENV{LLVM_HOME}/include)
 include_directories(/home/smithl/llvmnewest/llvm/tools/clang/include)
 include_directories(/home/smithl/llvmnewest/build/tools/clang/include)
+# I have several more directories included here as my project was unable to find them. I believe that there is a better fix for this if
+# this is a reoccuring problem, and you may be able to remove the fix completely depending on your llvm download.
 
 add_definitions(
   -D__STDC_LIMIT_MACROS
