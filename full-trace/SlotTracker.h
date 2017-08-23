@@ -4,11 +4,15 @@
 /// This class provides computation of slot numbers for LLVM Assembly writing.
 ///
 
-#if (LLVM_VERSION == 34)
+/*#if (LLVM_VERSION == 34)
   #include "llvm/DebugInfo.h"
 #elif (LLVM_VERSION == 35)
   #include "llvm/IR/DebugInfo.h"
-#endif
+#elif (LLVM_VERSION == 50)
+  #include "llvm/IR/DebugInfo.h"
+#endif*/
+
+#include "llvm/IR/DebugInfo.h"
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseMap.h"
@@ -26,10 +30,11 @@
 #include "llvm/IR/TypeFinder.h"
 #include "llvm/IR/ValueSymbolTable.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/Support/Dwarf.h"
+#include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/MathExtras.h"
+#include "llvm/Support/Casting.h"
 #include <algorithm>
 #include <cctype>
 using namespace llvm;
@@ -126,15 +131,15 @@ private:
     /// Add all of the functions arguments, basic blocks, and instructions.
     void processFunction();
     
-    SlotTracker(const SlotTracker &) LLVM_DELETED_FUNCTION;
-    void operator=(const SlotTracker &) LLVM_DELETED_FUNCTION;
+   // SlotTracker(const SlotTracker &) LLVM_DELETED_FUNCTION;
+   // void operator=(const SlotTracker &) LLVM_DELETED_FUNCTION;
 };
 
 SlotTracker *createSlotTracker(const Module *M) {
     return new SlotTracker(M);
 }
 
-static SlotTracker *createSlotTracker(const Value *V) {
+static SlotTracker *createSlotTracker(Value* V) {
     if (const Argument *FA = dyn_cast<Argument>(V))
         return new SlotTracker(FA->getParent());
     
@@ -154,9 +159,9 @@ static SlotTracker *createSlotTracker(const Value *V) {
     if (const Function *Func = dyn_cast<Function>(V))
         return new SlotTracker(Func);
     
-    if (const MDNode *MD = dyn_cast<MDNode>(V)) {
-        if (!MD->isFunctionLocal())
-            return new SlotTracker(MD->getFunction());
+    if (const MDNode *MD = dyn_cast<MDNode>(ValueAsMetadata::get(&*V))) {
+       // if (!MD->isFunctionLocal())
+       // return new SlotTracker(V->getParent());
         
         return new SlotTracker((Function *)0);
     }
@@ -200,31 +205,33 @@ void SlotTracker::processModule() {
     ST_DEBUG("begin processModule!\n");
     
     // Add all of the unnamed global variables to the value table.
-    for (Module::const_global_iterator I = TheModule->global_begin(),
+    for (auto I = TheModule->global_begin(),
          E = TheModule->global_end(); I != E; ++I) {
-        if (!I->hasName())
-            CreateModuleSlot(I);
+	const GlobalValue* J = &*I;
+        if (!J->hasName())
+            CreateModuleSlot(J);
     }
     
     // Add metadata used by named metadata.
     for (Module::const_named_metadata_iterator
          I = TheModule->named_metadata_begin(),
          E = TheModule->named_metadata_end(); I != E; ++I) {
-        const NamedMDNode *NMD = I;
+        const NamedMDNode* NMD = &*I;
         for (unsigned i = 0, e = NMD->getNumOperands(); i != e; ++i)
             CreateMetadataSlot(NMD->getOperand(i));
     }
     
     for (Module::const_iterator I = TheModule->begin(), E = TheModule->end();
          I != E; ++I) {
-        if (!I->hasName())
+	const Function* J = &*I;
+        if (!J->hasName())
             // Add all the unnamed functions to the table.
-            CreateModuleSlot(I);
+            CreateModuleSlot(J);
         
         // Add all the function attributes to the table.
         // FIXME: Add attributes of other objects?
-        AttributeSet FnAttrs = I->getAttributes().getFnAttributes();
-        if (FnAttrs.hasAttributes(AttributeSet::FunctionIndex))
+        AttributeSet FnAttrs = J->getAttributes().getFnAttributes();
+        if (FnAttrs.hasAttributes())
             CreateAttributeSetSlot(FnAttrs);
     }
     
@@ -247,39 +254,42 @@ void SlotTracker::processFunction() {
     SmallVector<std::pair<unsigned, MDNode*>, 4> MDForInst;
     
     // Add all of the basic blocks and instructions with no names.
-    for (Function::const_iterator BB = TheFunction->begin(),
-         E = TheFunction->end(); BB != E; ++BB) {
+    for (Function::const_iterator BBa = TheFunction->begin(),
+         E = TheFunction->end(); BBa != E; ++BBa) {
+	const Value* BB = &*BBa;
         if (!BB->hasName())
             CreateFunctionSlot(BB);
         
-        for (BasicBlock::const_iterator I = BB->begin(), E = BB->end(); I != E;
-             ++I) {
-            if (!I->getType()->isVoidTy() && !I->hasName())
-                CreateFunctionSlot(I);
+        for (BasicBlock::const_iterator J = BBa->begin(), E = BBa->end(); J != E;
+             ++J) {
+	    const Instruction* K = &*J;
+            if (!K->getType()->isVoidTy() && !K->hasName())
+                CreateFunctionSlot(K);
             
             // Intrinsics can directly use metadata.  We allow direct calls to any
             // llvm.foo function here, because the target may not be linked into the
             // optimizer.
-            if (const CallInst *CI = dyn_cast<CallInst>(I)) {
-                if (Function *F = CI->getCalledFunction())
+            if (const CallInst *CI = dyn_cast<CallInst>(K)) {
+                if (Function *F = CI->getCalledFunction()) {
                     if (F->isIntrinsic())
-                        for (unsigned i = 0, e = I->getNumOperands(); i != e; ++i)
-                            if (MDNode *N = dyn_cast_or_null<MDNode>(I->getOperand(i)))
-                                CreateMetadataSlot(N);
-                
+                        for (unsigned i = 0, e = K->getNumOperands(); i != e; ++i)
+                            if (MDNode *N = dyn_cast_or_null<MDNode>(ValueAsMetadata::get(K->getOperand(i)))) {
+                   //             CreateMetadataSlot(N);
+			}
+                }
                 // Add all the call attributes to the table.
-                AttributeSet Attrs = CI->getAttributes().getFnAttributes();
-                if (Attrs.hasAttributes(AttributeSet::FunctionIndex))
-                    CreateAttributeSetSlot(Attrs);
-            } else if (const InvokeInst *II = dyn_cast<InvokeInst>(I)) {
+                AttributeSet realAt = CI->getAttributes().getFnAttributes();
+                if (realAt.hasAttributes())
+                    CreateAttributeSetSlot(realAt);
+            } else if (const InvokeInst *II = dyn_cast<InvokeInst>(K)) {
                 // Add all the call attributes to the table.
                 AttributeSet Attrs = II->getAttributes().getFnAttributes();
-                if (Attrs.hasAttributes(AttributeSet::FunctionIndex))
+                if (Attrs.hasAttributes())
                     CreateAttributeSetSlot(Attrs);
             }
             
             // Process metadata attached with this instruction.
-            I->getAllMetadata(MDForInst);
+            K->getAllMetadata(MDForInst);
             for (unsigned i = 0, e = MDForInst.size(); i != e; ++i)
                 CreateMetadataSlot(MDForInst[i].second);
             MDForInst.clear();
@@ -378,23 +388,24 @@ void SlotTracker::CreateMetadataSlot(const MDNode *N) {
     
     // Don't insert if N is a function-local metadata, these are always printed
     // inline.
-    if (!N->isFunctionLocal()) {
+    // if (!N->isFunctionLocal()) {
         mdn_iterator I = mdnMap.find(N);
         if (I != mdnMap.end())
             return;
         
         unsigned DestSlot = mdnNext++;
         mdnMap[N] = DestSlot;
-    }
+    // }
     
     // Recursively add any MDNodes referenced by operands.
     for (unsigned i = 0, e = N->getNumOperands(); i != e; ++i)
         if (const MDNode *Op = dyn_cast_or_null<MDNode>(N->getOperand(i)))
             CreateMetadataSlot(Op);
+
 }
 
 void SlotTracker::CreateAttributeSetSlot(AttributeSet AS) {
-    assert(AS.hasAttributes(AttributeSet::FunctionIndex) &&
+    assert(AS.hasAttributes() &&
            "Doesn't need a slot!");
     
     as_iterator I = asMap.find(AS);

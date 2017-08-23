@@ -131,8 +131,8 @@ class LabeledStmtASTConsumer : public ASTConsumer {
 
 class LabeledStmtFrontendAction : public ASTFrontendAction {
  public:
-  virtual ASTConsumer* CreateASTConsumer(CompilerInstance& CI, StringRef file) {
-    return new LabeledStmtASTConsumer(&CI);
+  virtual std::unique_ptr<ASTConsumer> CreateASTConsumer(CompilerInstance& CI, StringRef file) {
+    return std::unique_ptr<clang::ASTConsumer>(new LabeledStmtASTConsumer(&CI));
   }
 
   // Dump the contents of labelMap to the output file.
@@ -166,7 +166,9 @@ int main(int argc, const char** argv) {
 #elif (LLVM_VERSION == 35)
   CommonOptionsParser op(argc, argv, GetLabelStmtsCat);
 #endif
-
+  
+  CommonOptionsParser op(argc, argv, GetLabelStmtsCat);
+  
   ClangTool Tool(op.getCompilations(), op.getSourcePathList());
   cleanup();
 

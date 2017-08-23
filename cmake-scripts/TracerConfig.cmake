@@ -1,6 +1,6 @@
 # In two-number form only. LLVM-Tracer will determine the patch version for you.
 if(NOT DEFINED LLVM_RECOMMEND_VERSION)
-  SET(LLVM_RECOMMEND_VERSION 3.4)
+  SET(LLVM_RECOMMEND_VERSION 6.0)
 endif()
 
 # TODO : not used now

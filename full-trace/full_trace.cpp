@@ -9,6 +9,7 @@
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Type.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/IR/InstIterator.h"
 #include <cstring>
 #include <cstdlib>
 #include <cstdio>
@@ -20,11 +21,15 @@
 #include "SlotTracker.h"
 #include "full_trace.h"
 
-#if (LLVM_VERSION == 34)
+/*#if (LLVM_VERSION == 34)
   #include "llvm/DebugInfo.h"
 #elif (LLVM_VERSION == 35)
   #include "llvm/IR/DebugInfo.h"
-#endif
+#elif (LLVM_VERSION == 50)
+  #include "llvm/IR/DebugInfo.h"
+#endif*/
+#include "llvm/IR/DebugInfo.h"
+#include "llvm/IR/DebugInfoMetadata.h"
 
 #define RESULT_LINE 19134
 #define FORWARD_LINE 24601
@@ -118,7 +123,7 @@ static Constant *createStringArg(const char *string, Module *curr_module) {
                                          APInt(32, StringRef("0"), 10));
     indices.push_back(zero);
     indices.push_back(zero);
-    return ConstantExpr::getGetElementPtr(gvar_array, indices);
+    return ConstantExpr::getGetElementPtr(ArrayTy_0, gvar_array, indices);
 }
 
 int getMemSize(Type *T) {
@@ -227,19 +232,30 @@ bool Tracer::doInitialization(Module &M) {
   DebugInfoFinder Finder;
   Finder.processModule(M);
 
-  #if (LLVM_VERSION == 34)
+  /*#if (LLVM_VERSION == 34)
     auto it = Finder.subprogram_begin();
     auto eit = Finder.subprogram_end();
   #elif (LLVM_VERSION == 35)
     auto it = Finder.subprograms().begin();
     auto eit = Finder.subprograms().end();
-  #endif
+  #elif (LLVM_VERSION == 50)
+    auto it = Finder.subprograms().begin();
+    auto eit = Finder.subprograms().end();
+  #endif*/
+   // auto test = Finder.subprograms();
+   // DISubprogram* Q = test[0].second;
+    DebugInfoFinder::subprogram_iterator it = Finder.subprograms().begin();
+    DebugInfoFinder::subprogram_iterator eit = Finder.subprograms().end();
 
-  for (auto i = it; i != eit; ++i) {
-    DISubprogram S(*i);
+ // for (DebugInfoFinder::subprogram_iterator i = it; i != eit; ++i) {
+    for (auto &F : M.functions()) {   
+// const MDNode* R = *i;
+   // DISubprogram* S = i[0].second;
+   // DISubprogram S(*i);
+    if (DISubprogram* S = cast_or_null<DISubprogram>(F.getSubprogram())) {
 
-    auto MangledName = S.getLinkageName().str();
-    auto Name = S.getName().str();
+    auto MangledName = S->getLinkageName().str();
+    auto Name = S->getName().str();
 
     assert(Name.size() || MangledName.size());
 
@@ -256,6 +272,7 @@ bool Tracer::doInitialization(Module &M) {
       } else {
         this->tracked_functions.insert(MangledName);
       }
+    }
     }
   }
 
@@ -301,11 +318,12 @@ bool Tracer::runOnBasicBlock(BasicBlock &BB) {
     handlePhiNodes(&BB, &env);
 
   // From this point onwards, nodes cannot be PHI nodes.
-  BasicBlock::iterator nextitr;
-  for (BasicBlock::iterator itr = insertp; itr != BB.end(); itr = nextitr) {
-    nextitr = itr;
-    nextitr++;
-
+  BasicBlock::iterator nextitr1;
+  for (BasicBlock::iterator itr1 = insertp; itr1 != BB.end(); itr1 = nextitr1) {
+    nextitr1 = itr1;
+    nextitr1++;
+    Instruction* itr = &*itr1;
+    Instruction* nextitr = &*nextitr1;
     // Get static BasicBlock ID: produce bbid
     makeValueId(&BB, env.bbid);
     // Get static instruction ID: produce instid
@@ -339,7 +357,7 @@ bool Tracer::runOnBasicBlock(BasicBlock &BB) {
     }
 
     if (isa<AllocaInst>(itr)) {
-      processAllocaInstruction(itr);
+      processAllocaInstruction(itr1);
     }
   }
   return false;
@@ -485,7 +503,7 @@ void Tracer::processAllocaInstruction(BasicBlock::iterator it) {
     // The debug declare call is not guaranteed to come right after the alloca.
     while (!found_debug_declare && !it->isTerminator()) {
       it++;
-      Instruction *I = it;
+      Instruction* I = &*it;
       DbgDeclareInst *di = dyn_cast<DbgDeclareInst>(I);
       if (di) {
         Value *wrapping_arg = di->getAddress();
@@ -499,10 +517,10 @@ void Tracer::processAllocaInstruction(BasicBlock::iterator it) {
         if (id != alloca_id)
           continue;
 
-        MDNode *md = di->getVariable();
+        DIVariable *md = di->getVariable();
         // The name of the variable is the third operand of the metadata node.
-        Value *name_operand = md->getOperand(2);
-        std::string name = name_operand->getName().str();
+        //Value *name_operand = md->getOperand(2);
+        std::string name = md->getName();
         slotToVarName[id] = name;
         found_debug_declare = true;
       }
@@ -514,7 +532,8 @@ void Tracer::makeValueId(Value *value, char *id_str) {
   int id = st->getLocalSlot(value);
   bool hasName = value->hasName();
   if (BasicBlock* BB = dyn_cast<BasicBlock>(value)) {
-    LoopInfo &info = getAnalysis<LoopInfo>();
+   // LoopInfo &info = getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
+    LoopInfo &info = getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
     unsigned loop_depth = info.getLoopDepth(BB);
     // 10^3 - 1 is the maximum loop depth.
     const unsigned kMaxLoopDepthChars = 3;
@@ -543,8 +562,10 @@ bool Tracer::isDmaFunction(std::string& funcName) {
 
 void Tracer::setLineNumberIfExists(Instruction *I, InstEnv *env) {
   if (MDNode *N = I->getMetadata("dbg")) {
-    DILocation Loc(N); // DILocation is in DebugInfo.h
-    env->line_number = Loc.getLineNumber();
+    if (DILocation *Loc = I->getDebugLoc()) {
+   // DILocation Loc(N); // DILocation is in DebugInfo.h
+    env->line_number = Loc->getLine();
+	}
   } else {
     env->line_number = -1;
   }
@@ -552,12 +573,13 @@ void Tracer::setLineNumberIfExists(Instruction *I, InstEnv *env) {
 
 // Handle all phi nodes at the beginning of a basic block.
 void Tracer::handlePhiNodes(BasicBlock* BB, InstEnv* env) {
-  BasicBlock::iterator insertp = BB->getFirstInsertionPt();
-
+  BasicBlock::iterator insertp1 = BB->getFirstInsertionPt();
+  Instruction* insertp = &*insertp;
   char prev_bbid[InstEnv::BUF_SIZE];
   char operR[InstEnv::BUF_SIZE];
 
-  for (BasicBlock::iterator itr = BB->begin(); isa<PHINode>(itr); itr++) {
+  for (BasicBlock::iterator itr1 = BB->begin(); isa<PHINode>(itr1); itr1++) {
+    Instruction* itr = &*itr1;
     InstOperandParams params;
     params.prev_bbid = prev_bbid;
     params.operand_name = operR;
@@ -657,9 +679,8 @@ void Tracer::handleCallInstruction(Instruction* inst, InstEnv* env) {
   printParamLine(inst, &params);
 
   int call_id = 0;
-  const Function::ArgumentListType &Args(fun->getArgumentList());
-  for (Function::ArgumentListType::const_iterator arg_it = Args.begin(),
-                                                  arg_end = Args.end();
+//  const Function::ArgumentListType &Args(fun->getArgumentList());
+  for (auto arg_it = fun->arg_begin(), arg_end = fun->arg_end();
        arg_it != arg_end; ++arg_it, ++call_id) {
     Value* curr_operand = inst->getOperand(call_id);
 
@@ -793,7 +814,7 @@ void Tracer::handleInstructionResult(Instruction *inst, Instruction *next_inst,
 }
 
 void Tracer::getAnalysisUsage(AnalysisUsage& Info) const {
-  Info.addRequired<LoopInfo>();
+  Info.addRequired<LoopInfoWrapperPass>();
   Info.setPreservesAll();
 }
 
@@ -813,8 +834,8 @@ bool LabelMapHandler::runOnModule(Module &M) {
 
     if (verbose)
       errs() << "Contents of labelmap:\n" << labelmap_str << "\n";
-
-    IRBuilder<> builder(main->front().getFirstInsertionPt());
+    Instruction* frontInst = &*main->front().getFirstInsertionPt();
+    IRBuilder<> builder(frontInst);
     Function* labelMapWriter = cast<Function>(M.getOrInsertFunction(
         "trace_logger_write_labelmap", builder.getVoidTy(),
         builder.getInt8PtrTy(), builder.getInt64Ty(), nullptr));

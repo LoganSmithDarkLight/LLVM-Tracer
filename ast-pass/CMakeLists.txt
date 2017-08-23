@@ -6,6 +6,8 @@ set(CMAKE_CXX_COMPILER g++)
 
 link_directories($ENV{LLVM_HOME}/lib)
 include_directories($ENV{LLVM_HOME}/include)
+include_directories(/home/smithl/llvmnewest/llvm/tools/clang/include)
+include_directories(/home/smithl/llvmnewest/build/tools/clang/include)
 
 add_definitions(
   -D__STDC_LIMIT_MACROS
@@ -42,7 +44,7 @@ target_link_libraries(get-labeled-stmts
   LLVMScalarOpts
   LLVMInstCombine
   LLVMTransformUtils
-  LLVMipa
+#  LLVMipa
   LLVMAnalysis
   LLVMTarget
   LLVMOption # Support
